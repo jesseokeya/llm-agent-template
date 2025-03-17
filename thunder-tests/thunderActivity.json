@@ -8,11 +8,11 @@
         "method": "POST",
         "sortNum": 0,
         "created": "2025-03-17T11:32:45.640Z",
-        "modified": "2025-03-17T16:35:31.862Z",
+        "modified": "2025-03-17T16:47:32.921Z",
         "headers": [],
         "body": {
             "type": "json",
-            "raw": "{\n  \"message\": \"A medical checkup on the 17th of april by 3pm EST\",\n   \"conversationId\": \"conv_939a5849-fc5e-45c7-bb50-78ea09ff6b66\"\n}",
+            "raw": "{\n  \"message\": \"Can i cancel my appointment something came up\",\n   \"conversationId\": \"conv_939a5849-fc5e-45c7-bb50-78ea09ff6b66\"\n}",
             "form": []
         }
     }

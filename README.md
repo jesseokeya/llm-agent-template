@@ -2,7 +2,7 @@
 
 A production-grade LLM application template built with LangGraph, LangChain.js, and TypeScript. This application provides conversational AI with action extraction capabilities and RAG for context enhancement.
 
-![Langraph Dashboard](images/langraph.png)
+![Langraph Dashboard](images/langraph-v2.png)
 
 ## Features
 
@@ -23,6 +23,108 @@ The application follows a modular architecture with clear separation of concerns
 - **Storage Layer**: DynamoDB for conversation and action persistence
 - **Vector Layer**: Pinecone for semantic search and retrieval
 - **Worker Layer**: Background processors for asynchronous action execution
+
+```mermaid
+flowchart TB
+    %% Client/API Layer
+    Client([Client Application]) -->|HTTP Request| APILayer
+    
+    subgraph APILayer["API Layer (Express.js)"]
+        API["/api/conversation/chat"] --> ConvHandler[Conversation Handler]
+        ActAPI["/api/actions/:actionId"] --> ActHandler[Actions Handler]
+        HealthAPI["/api/health"] --> HealthHandler[Health Check]
+    end
+    
+    %% Conversation Processing Layer
+    subgraph ConvProcessing["Conversation Processing"]
+        ConvHandler --> SessionManager["Tracing Manager\n(trace-manager.ts)"]
+        SessionManager --> ConvGraph["Conversation Graph\n(conversation-graph.ts)"]
+        
+        subgraph GraphNodes["LangGraph Nodes"]
+            direction LR
+            RetrievalNode["Retrieval Node\n(retrievalNode)"]
+            ActionNode["Action Extraction\n(extractActionsNode)"]
+            ExecNode["Action Execution\n(executeActionsNode)"]
+            GenNode["Response Generation\n(generateResponseNode)"]
+            
+            RetrievalNode --> ActionNode
+            ActionCondition{"Has Actions?"}
+            ActionNode --> ActionCondition
+            ActionCondition -->|Yes| ExecNode
+            ActionCondition -->|No| GenNode
+            ExecNode --> ActionGenNode["Generate with Actions\n(generateResponseWithActionSummaryNode)"]
+        end
+        
+        ConvGraph --> GraphNodes
+        GenNode & ActionGenNode --> StateUpdater["State Updater"]
+    end
+    
+    %% State Management
+    subgraph StateManagement["State Management"]
+        StateStore["Conversation Store\n(conversation-store.ts)"]
+        StateObjectHandling["Message Object Handling\n(serialization/deserialization)"]
+        ConvMemory["Conversation Memory\n(memory.ts)"]
+        
+        StateUpdater --> StateStore
+        StateStore <--> StateObjectHandling
+        ConvMemory <--> StateObjectHandling
+    end
+    
+    %% LLM & Vector Store
+    subgraph ExternalServices["External Services"]
+        direction TB
+        LLMService["OpenAI LLM\n(llm.ts)"]
+        EmbeddingService["Embeddings API\n(embeddings.ts)"]
+        VectorDB["Pinecone Vector DB\n(vector-store.ts)"]
+        
+        EmbeddingService --> VectorDB
+    end
+    
+    %% Action System
+    subgraph ActionSystem["Action System"]
+        FunctionDefs["Function Definitions\n(function-definitions.ts)"]
+        ActionQueue["Action Queue\n(action-store.ts)"]
+        ActionWorker["Action Worker\n(action-processor.ts)"]
+        
+        FunctionDefs --> ActionNode
+        ActionNode --> ActionQueue
+        ActionQueue --> ActionWorker
+        ActionWorker --> ExternalTools["External Tools\n(Calendar, Notes, etc)"]
+    end
+    
+    %% Database Layer
+    subgraph Storage["Storage Layer"]
+        DynamoDB[(DynamoDB)]
+        DynamoClient["DynamoDB Client\n(dynamo-client.ts)"]
+        
+        DynamoClient <--> DynamoDB
+        StateStore <--> DynamoClient
+        ActionQueue <--> DynamoClient
+    end
+    
+    %% Key Connections
+    ConvHandler <--> StateStore
+    RetrievalNode <--> VectorDB
+    GenNode <--> LLMService
+    ActionGenNode <--> LLMService
+    ActionNode <--> LLMService
+    
+    %% Data Flows
+    Client -->|User Query| API
+    APILayer -->|Response| Client
+    
+    classDef primary fill:#3498db,stroke:#2980b9,color:white;
+    classDef secondary fill:#2ecc71,stroke:#27ae60,color:white;
+    classDef tertiary fill:#9b59b6,stroke:#8e44ad,color:white;
+    classDef database fill:#e74c3c,stroke:#c0392b,color:white;
+    classDef external fill:#f39c12,stroke:#d35400,color:white;
+    
+    class APILayer,ConvHandler,API,ActAPI,HealthAPI,ActHandler,HealthHandler primary;
+    class ConvProcessing,ConvGraph,GraphNodes,RetrievalNode,ActionNode,ExecNode,GenNode,ActionGenNode,StateUpdater,ActionCondition secondary;
+    class StateManagement,StateStore,StateObjectHandling,ConvMemory tertiary;
+    class Storage,DynamoDB,DynamoClient database;
+    class ExternalServices,LLMService,EmbeddingService,VectorDB,ActionSystem,FunctionDefs,ActionQueue,ActionWorker,ExternalTools external;
+```
 
 ## Getting Started
 
