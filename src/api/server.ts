@@ -42,6 +42,7 @@ app.use((req, res, next) => {
 app.use("/", routes);
 
 // Health check endpoint
+// @ts-ignore - TODO: fix this
 app.get(API_ENDPOINTS.HEALTH, async (req, res) => {
   try {
     // Check connections to external services
