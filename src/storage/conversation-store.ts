@@ -17,13 +17,113 @@ const logger = createLogger("conversation-store");
 const TABLE_NAME = DB_TABLES.CONVERSATION_STATES;
 
 /**
+ * Helper function to serialize a message for storage
+ */
+function serializeMessage(message: any) {
+  // Don't just use JSON.stringify on the whole message, as it won't properly handle methods and complex objects
+  try {
+    // Extract the important properties
+    const type =
+      typeof message._getType === "function" ? message._getType() : "unknown";
+    const content = message.content?.toString() || "";
+    const additionalKwargs = message.additional_kwargs || {};
+
+    // Add a timestamp if not present
+    if (!additionalKwargs.timestamp) {
+      additionalKwargs.timestamp = Date.now();
+    }
+
+    // Return a simplified object with just the necessary data
+    return {
+      type,
+      content,
+      additional_kwargs: additionalKwargs,
+    };
+  } catch (error) {
+    logger.error({ error }, "Error serializing message");
+    return {
+      type: "unknown",
+      content: "",
+      additional_kwargs: { timestamp: Date.now() },
+    };
+  }
+}
+
+/**
+ * Helper function to reconstruct proper Message objects from serialized data
+ */
+function reconstructMessages(messages: any[]) {
+  if (!Array.isArray(messages)) return [];
+
+  return messages
+    .map((msg) => {
+      try {
+        // Skip if message is null or undefined
+        if (!msg) return null;
+
+        // If it already has _getType as a function, return as is
+        if (typeof msg._getType === "function") {
+          return msg;
+        }
+
+        // Get the message type
+        const type = msg.type || (msg._getType as string) || "unknown";
+
+        // Get content and kwargs
+        const content = msg.content || "";
+        const additionalKwargs = msg.additional_kwargs || {};
+
+        // If timestamp is missing, add it
+        if (!additionalKwargs.timestamp) {
+          additionalKwargs.timestamp = Date.now();
+        }
+
+        // Return the appropriate message type
+        if (type === "human") {
+          return new HumanMessage(content, additionalKwargs);
+        } else if (type === "ai") {
+          return new AIMessage(content, additionalKwargs);
+        } else if (type === "system") {
+          return new SystemMessage(content, additionalKwargs);
+        }
+
+        // Default to human message if type is unknown
+        logger.warn(
+          { messageType: type },
+          "Unknown message type, converting to HumanMessage"
+        );
+        return new HumanMessage(content, additionalKwargs);
+      } catch (error) {
+        logger.error({ error, message: msg }, "Error reconstructing message");
+        return null;
+      }
+    })
+    .filter(Boolean); // Remove any null values
+}
+
+/**
+ * Prepare a state object for storage by properly serializing each field
+ */
+function serializeState(state: ConversationState): any {
+  return {
+    conversationId: state.conversationId,
+    messages: state.messages.map(serializeMessage),
+    context: state.context || [],
+    pending_actions: state.pending_actions || [],
+  };
+}
+
+/**
  * Save conversation state to DynamoDB
  */
 export async function saveConversationState(
   state: ConversationState
 ): Promise<void> {
   logger.debug(
-    { conversationId: state.conversationId },
+    {
+      conversationId: state.conversationId,
+      messageCount: state.messages.length,
+    },
     "Saving conversation state"
   );
 
@@ -31,9 +131,12 @@ export async function saveConversationState(
     // Calculate TTL (days from now)
     const ttl = Math.floor(Date.now() / 1000) + CONVERSATION_TTL_DAYS * 86400;
 
+    // Properly serialize the state to handle LangChain message objects
+    const serializedState = serializeState(state);
+
     const storedState: StoredConversationState = {
       id: state.conversationId,
-      state: JSON.stringify(state),
+      state: JSON.stringify(serializedState),
       lastUpdated: new Date().toISOString(),
       ttl,
     };
@@ -41,7 +144,12 @@ export async function saveConversationState(
     await putItem(TABLE_NAME, storedState);
 
     logger.debug(
-      { conversationId: state.conversationId },
+      {
+        conversationId: state.conversationId,
+        messageCount: state.messages.length,
+        context: state.context.length,
+        pendingActions: state.pending_actions.length,
+      },
       "Conversation state saved successfully"
     );
   } catch (error) {
@@ -53,51 +161,6 @@ export async function saveConversationState(
       `Failed to save conversation state: ${(error as Error).message}`
     );
   }
-}
-
-/**
- * Helper function to reconstruct proper Message objects
- */
-function reconstructMessages(messages: any[]) {
-  if (!Array.isArray(messages)) return [];
-
-  return messages
-    .map((msg) => {
-      // Check what kind of message this is based on available data
-      if (!msg) return null;
-
-      // If it already has _getType as a function, return as is
-      if (typeof msg._getType === "function") {
-        return msg;
-      }
-
-      // Otherwise check the type from the stored data
-      const type =
-        msg.type ||
-        (typeof msg._getType === "string" ? msg._getType : null) ||
-        msg.additional_kwargs?.type ||
-        "";
-
-      const content = msg.content || "";
-      const additionalKwargs = msg.additional_kwargs || {};
-
-      // Reconstruct the appropriate message type
-      if (type === "human" || type.includes("human")) {
-        return new HumanMessage(content, additionalKwargs);
-      } else if (type === "ai" || type.includes("ai")) {
-        return new AIMessage(content, additionalKwargs);
-      } else if (type === "system" || type.includes("system")) {
-        return new SystemMessage(content, additionalKwargs);
-      }
-
-      // Last resort: treat as human message
-      logger.warn(
-        { messageType: type },
-        "Unknown message type, converting to HumanMessage"
-      );
-      return new HumanMessage(content, additionalKwargs);
-    })
-    .filter(Boolean); // Remove any null messages
 }
 
 /**
@@ -120,25 +183,28 @@ export async function loadConversationState(
 
     try {
       // Parse the stored state
-      const parsedState = JSON.parse(storedState.state) as ConversationState;
+      const serializedState = JSON.parse(storedState.state);
 
-      // Reconstruct message objects to ensure they have the right methods
-      if (parsedState.messages) {
-        parsedState.messages = reconstructMessages(parsedState.messages);
-      } else {
-        parsedState.messages = [];
-      }
+      // Reconstruct full state with proper message objects
+      const parsedState: ConversationState = {
+        conversationId: serializedState.conversationId || conversationId,
+        messages: reconstructMessages(serializedState.messages || []),
+        context: serializedState.context || [],
+        pending_actions: serializedState.pending_actions || [],
+      };
 
-      // Ensure other fields exist
-      if (!parsedState.context) parsedState.context = [];
-      if (!parsedState.pending_actions) parsedState.pending_actions = [];
+      // Log message types for debugging
+      const messageTypes = parsedState.messages.map((m) =>
+        typeof m._getType === "function" ? m._getType() : "unknown"
+      );
 
       logger.debug(
         {
           conversationId,
           messageCount: parsedState.messages.length,
+          messageTypes,
         },
-        "Conversation state loaded and reconstructed successfully"
+        "Conversation state loaded successfully"
       );
 
       return parsedState;
@@ -174,6 +240,16 @@ export async function getOrCreateConversationState(
     : null;
 
   if (existingState) {
+    logger.debug(
+      {
+        conversationId: id,
+        messageCount: existingState.messages.length,
+        contextCount: existingState.context.length,
+        pendingActionsCount: existingState.pending_actions.length,
+      },
+      "Retrieved existing conversation state"
+    );
+
     return existingState;
   }
 

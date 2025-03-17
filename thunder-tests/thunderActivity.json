@@ -8,11 +8,11 @@
         "method": "POST",
         "sortNum": 0,
         "created": "2025-03-17T11:32:45.640Z",
-        "modified": "2025-03-17T15:45:32.572Z",
+        "modified": "2025-03-17T16:35:31.862Z",
         "headers": [],
         "body": {
             "type": "json",
-            "raw": "{\n  \"message\": \"Can i ask about issues related to my roofing project ?\",\n  \"conversationId\": \"conv_62aa262c-024f-40d5-b5e9-33935c439f6f\"\n}",
+            "raw": "{\n  \"message\": \"A medical checkup on the 17th of april by 3pm EST\",\n   \"conversationId\": \"conv_939a5849-fc5e-45c7-bb50-78ea09ff6b66\"\n}",
             "form": []
         }
     }

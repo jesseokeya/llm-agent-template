@@ -17,16 +17,22 @@ export function addHumanMessage(
   content: string
 ): ConversationState {
   logger.debug(
-    { conversationId: state.conversationId },
+    {
+      conversationId: state.conversationId,
+      messageCount: state.messages.length,
+    },
     "Adding human message"
   );
 
-  const message = new HumanMessage(content);
-  // Add timestamp to ensure proper serialization
-  message.additional_kwargs = {
-    ...message.additional_kwargs,
+  if (!content || content.trim() === "") {
+    logger.warn("Attempted to add empty human message, ignoring");
+    return state;
+  }
+
+  // Create a new message with timestamp
+  const message = new HumanMessage(content, {
     timestamp: Date.now(),
-  };
+  });
 
   return {
     ...state,
@@ -41,14 +47,23 @@ export function addAIMessage(
   state: ConversationState,
   content: string
 ): ConversationState {
-  logger.debug({ conversationId: state.conversationId }, "Adding AI message");
+  logger.debug(
+    {
+      conversationId: state.conversationId,
+      messageCount: state.messages.length,
+    },
+    "Adding AI message"
+  );
 
-  const message = new AIMessage(content);
-  // Add timestamp to ensure proper serialization
-  message.additional_kwargs = {
-    ...message.additional_kwargs,
+  if (!content || content.trim() === "") {
+    logger.warn("Attempted to add empty AI message, ignoring");
+    return state;
+  }
+
+  // Create a new message with timestamp
+  const message = new AIMessage(content, {
     timestamp: Date.now(),
-  };
+  });
 
   return {
     ...state,
@@ -64,16 +79,21 @@ export function addSystemMessage(
   content: string
 ): ConversationState {
   logger.debug(
-    { conversationId: state.conversationId },
+    {
+      conversationId: state.conversationId,
+    },
     "Adding system message"
   );
 
-  const message = new SystemMessage(content);
-  // Add timestamp to ensure proper serialization
-  message.additional_kwargs = {
-    ...message.additional_kwargs,
+  if (!content || content.trim() === "") {
+    logger.warn("Attempted to add empty system message, ignoring");
+    return state;
+  }
+
+  // Create a new message with timestamp
+  const message = new SystemMessage(content, {
     timestamp: Date.now(),
-  };
+  });
 
   return {
     ...state,
@@ -88,13 +108,29 @@ export function getMessageHistory(
   state: ConversationState,
   limit = CONVERSATION.MAX_HISTORY_LENGTH
 ) {
-  // If there are fewer messages than the limit, return all messages
-  if (state.messages.length <= limit) {
-    return state.messages;
+  // Validate the conversation state
+  if (!state || !Array.isArray(state.messages)) {
+    logger.warn("Invalid conversation state or messages array");
+    return [];
+  }
+
+  // Filter out any invalid messages
+  const validMessages = state.messages.filter((msg) => {
+    return msg && (typeof msg._getType === "function" || msg.content);
+  });
+
+  // If there are no valid messages, return empty array
+  if (validMessages.length === 0) {
+    return [];
+  }
+
+  // If there are fewer messages than the limit, return all valid messages
+  if (validMessages.length <= limit) {
+    return validMessages;
   }
 
   // Otherwise, return the most recent messages up to the limit
-  return state.messages.slice(-limit);
+  return validMessages.slice(-limit);
 }
 
 /**
@@ -108,12 +144,23 @@ export function getFormattedMessageHistory(
 
   return messages
     .map((message) => {
-      const role = message._getType();
-      const content = message.content;
-      return `${
-        role === "human" ? "Human" : role === "ai" ? "Assistant" : "System"
-      }: ${content}`;
+      try {
+        const role =
+          typeof message._getType === "function"
+            ? message._getType()
+            : "unknown";
+
+        const content = message.content?.toString() || "";
+
+        return `${
+          role === "human" ? "Human" : role === "ai" ? "Assistant" : "System"
+        }: ${content}`;
+      } catch (error) {
+        logger.error({ error }, "Error formatting message");
+        return "";
+      }
     })
+    .filter((msg) => msg) // Remove empty messages
     .join("\n\n");
 }
 
@@ -170,7 +217,9 @@ export async function summarizeConversationHistory(
   return {
     ...state,
     messages: [
-      new SystemMessage(`Previous conversation summary: ${summary}`),
+      new SystemMessage(`Previous conversation summary: ${summary}`, {
+        timestamp: Date.now(),
+      }),
       ...recentMessages,
     ],
   };

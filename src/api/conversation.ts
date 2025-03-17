@@ -31,6 +31,10 @@ const runIdMap = new Map<string, string>();
 // @ts-ignore - express router
 router.post("/chat", async (req, res) => {
   try {
+    logger.info("Received chat request", {
+      runIdMap: Array.from(runIdMap.entries()),
+    });
+
     // Validate request
     const validationResult = chatRequestSchema.safeParse(req.body);
 
