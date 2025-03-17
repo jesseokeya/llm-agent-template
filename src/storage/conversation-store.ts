@@ -7,6 +7,11 @@ import { CONVERSATION_TTL_DAYS } from "../config/env";
 import { getItem, putItem, queryItems, deleteItem } from "./dynamo-client";
 import { createLogger } from "../utils/logger";
 import { v4 as uuidv4 } from "uuid";
+import {
+  HumanMessage,
+  AIMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
 
 const logger = createLogger("conversation-store");
 const TABLE_NAME = DB_TABLES.CONVERSATION_STATES;
@@ -51,6 +56,51 @@ export async function saveConversationState(
 }
 
 /**
+ * Helper function to reconstruct proper Message objects
+ */
+function reconstructMessages(messages: any[]) {
+  if (!Array.isArray(messages)) return [];
+
+  return messages
+    .map((msg) => {
+      // Check what kind of message this is based on available data
+      if (!msg) return null;
+
+      // If it already has _getType as a function, return as is
+      if (typeof msg._getType === "function") {
+        return msg;
+      }
+
+      // Otherwise check the type from the stored data
+      const type =
+        msg.type ||
+        (typeof msg._getType === "string" ? msg._getType : null) ||
+        msg.additional_kwargs?.type ||
+        "";
+
+      const content = msg.content || "";
+      const additionalKwargs = msg.additional_kwargs || {};
+
+      // Reconstruct the appropriate message type
+      if (type === "human" || type.includes("human")) {
+        return new HumanMessage(content, additionalKwargs);
+      } else if (type === "ai" || type.includes("ai")) {
+        return new AIMessage(content, additionalKwargs);
+      } else if (type === "system" || type.includes("system")) {
+        return new SystemMessage(content, additionalKwargs);
+      }
+
+      // Last resort: treat as human message
+      logger.warn(
+        { messageType: type },
+        "Unknown message type, converting to HumanMessage"
+      );
+      return new HumanMessage(content, additionalKwargs);
+    })
+    .filter(Boolean); // Remove any null messages
+}
+
+/**
  * Load conversation state from DynamoDB
  */
 export async function loadConversationState(
@@ -69,11 +119,28 @@ export async function loadConversationState(
     }
 
     try {
+      // Parse the stored state
       const parsedState = JSON.parse(storedState.state) as ConversationState;
+
+      // Reconstruct message objects to ensure they have the right methods
+      if (parsedState.messages) {
+        parsedState.messages = reconstructMessages(parsedState.messages);
+      } else {
+        parsedState.messages = [];
+      }
+
+      // Ensure other fields exist
+      if (!parsedState.context) parsedState.context = [];
+      if (!parsedState.pending_actions) parsedState.pending_actions = [];
+
       logger.debug(
-        { conversationId },
-        "Conversation state loaded successfully"
+        {
+          conversationId,
+          messageCount: parsedState.messages.length,
+        },
+        "Conversation state loaded and reconstructed successfully"
       );
+
       return parsedState;
     } catch (parseError) {
       logger.error(

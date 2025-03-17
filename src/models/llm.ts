@@ -21,9 +21,7 @@ export function createChatModel() {
     temperature: LLM_TEMPERATURE,
     timeout: TIMEOUTS.LLM_REQUEST_TIMEOUT_MS,
     maxRetries: TIMEOUTS.RETRY_ATTEMPTS,
-    // Cache settings for improved performance
     cache: true,
-    maxConcurrency: 5,
   });
 }
 
@@ -35,22 +33,15 @@ export function createFunctionCallingModel(functions: any[]) {
     `Creating function calling model with ${functions.length} functions`
   );
 
-  const model = new ChatOpenAI({
+  return new ChatOpenAI({
     openAIApiKey: OPENAI_API_KEY,
     modelName: LLM_MODEL,
-    temperature: 0.1, // Lower temperature for more deterministic function calls
+    temperature: 0.1,
     timeout: TIMEOUTS.LLM_REQUEST_TIMEOUT_MS,
     maxRetries: TIMEOUTS.RETRY_ATTEMPTS,
+  }).bind({
+    tools: functions,
   });
-
-  // Format tools for the OpenAI API
-  const tools = functions.map((func) => ({
-    type: "function" as const,
-    function: func,
-  }));
-
-  // Bind the tools to the model
-  return model.bind({ tools });
 }
 
 /**
@@ -78,13 +69,49 @@ export function createRagPrompt() {
 
 /**
  * Format chat history for insertion into prompts
+ * With robust error handling for potentially malformed messages
  */
 export function formatChatHistory(messages: BaseMessage[]): string {
-  return messages
-    .map((message) => {
-      const role = message._getType();
-      const content = message.content.toString();
-      return `${role === "human" ? "Human" : "Assistant"}: ${content}`;
-    })
-    .join("\n\n");
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return "";
+  }
+
+  try {
+    return messages
+      .map((message) => {
+        try {
+          // Safe access to message type using _getType method
+          let role = "unknown";
+
+          if (typeof message._getType === "function") {
+            role = message._getType();
+          } else if (typeof message["_getType"] === "string") {
+            // Fallback for serialized messages
+            role = message["_getType"] as string;
+          } else {
+            // Last attempt to get type from any custom properties
+            role = (message as any).type || "unknown";
+          }
+
+          // Safe access to content
+          const content = message.content || "";
+
+          return `${
+            role === "human" ? "Human" : role === "ai" ? "Assistant" : "System"
+          }: ${content}`;
+        } catch (err) {
+          logger.warn("Error formatting individual message", {
+            error: err,
+            message: message,
+          });
+
+          return ""; // Skip problematic messages
+        }
+      })
+      .filter((msg) => msg !== "") // Remove empty messages
+      .join("\n\n");
+  } catch (error) {
+    logger.error({ error }, "Error formatting chat history");
+    return "Previous conversation history unavailable.";
+  }
 }

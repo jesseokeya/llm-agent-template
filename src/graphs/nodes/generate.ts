@@ -28,8 +28,34 @@ export async function generateResponseNode(
   logger.debug({ conversationId: state.conversationId }, "Generating response");
 
   try {
-    // Get history and context
+    // Validate state has messages
     const history = getMessageHistory(state, CONVERSATION.MAX_HISTORY_LENGTH);
+
+    // Check if we have a valid history with at least one message
+    if (!history || history.length === 0) {
+      logger.warn(
+        { conversationId: state.conversationId },
+        "No message history found"
+      );
+      return addAIMessage(
+        state,
+        "I don't see any previous messages in our conversation. How can I help you today?"
+      );
+    }
+
+    // Get the last message for input
+    const lastMessage = history[history.length - 1];
+    if (!lastMessage || !lastMessage.content) {
+      logger.warn(
+        { conversationId: state.conversationId },
+        "Last message is invalid"
+      );
+      return addAIMessage(
+        state,
+        "I'm having trouble understanding your last message. Could you please try again?"
+      );
+    }
+
     const formattedHistory = formatChatHistory(history);
     const context = getAllContextAsString(state);
 
@@ -37,7 +63,7 @@ export async function generateResponseNode(
     const input = {
       chat_history: formattedHistory,
       context: context || "No relevant context found.",
-      input: history[history.length - 1].content,
+      input: lastMessage.content.toString(),
     };
 
     // Generate response
@@ -60,8 +86,19 @@ export async function generateResponseNode(
     // Add the response to the conversation
     return addAIMessage(state, responseContent as string);
   } catch (error) {
+    // Improved error logging
     logger.error(
-      { error, conversationId: state.conversationId },
+      {
+        error,
+        errorMessage: (error as Error).message,
+        errorStack: (error as Error).stack,
+        conversationId: state.conversationId,
+        stateInfo: {
+          messageCount: state?.messages?.length || 0,
+          contextCount: state?.context?.length || 0,
+          pendingActionsCount: state?.pending_actions?.length || 0,
+        },
+      },
       "Error generating response"
     );
 
@@ -139,6 +176,7 @@ export async function generateResponseWithActionSummaryNode(
     // Add the response to the conversation
     return addAIMessage(state, response.content as string);
   } catch (error) {
+    console.log(error);
     logger.error({ error }, "Error generating response with action summary");
 
     // Return a fallback response

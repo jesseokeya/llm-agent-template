@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { createAdvancedConversationGraph } from "../graphs/conversation-graph";
+import { createMinimalGraph } from "../graphs/conversation-graph";
 import {
   getOrCreateConversationState,
   saveConversationState,
@@ -9,7 +9,7 @@ import { addHumanMessage } from "../conversation/memory";
 import {
   //   ChatRequest,
   ChatResponse,
-  ConversationState,
+  // ConversationState,
 } from "../types/conversation";
 import { createLogger } from "../utils/logger";
 
@@ -27,7 +27,7 @@ const chatRequestSchema = z.object({
  * POST /api/conversation/chat
  * Main endpoint for chat interactions
  */
-// @ts-ignore - TODO: fix this
+// @ts-ignore -
 router.post("/chat", async (req, res) => {
   try {
     // Validate request
@@ -63,48 +63,93 @@ router.post("/chat", async (req, res) => {
     // Add the user message to state
     const updatedState = addHumanMessage(state, message);
 
+    // Add detailed logging of the state structure
+    logger.debug(
+      {
+        conversationId: updatedState.conversationId,
+        stateStructure: {
+          hasMessages: Array.isArray(updatedState.messages),
+          messagesCount: updatedState.messages.length,
+          hasContext: Array.isArray(updatedState.context),
+          hasPendingActions: Array.isArray(updatedState.pending_actions),
+          stateKeys: Object.keys(updatedState),
+        },
+      },
+      "State structure before graph invocation"
+    );
+
     // Create the conversation graph
-    const graph = createAdvancedConversationGraph();
+    let graph;
+    try {
+      // Try using the minimal fallback graph which has built-in error handling
+      graph = createMinimalGraph();
+      logger.debug("Minimal fallback graph created successfully");
+    } catch (graphError) {
+      logger.error(
+        {
+          error: graphError,
+          message: (graphError as Error).message,
+          stack: (graphError as Error).stack,
+        },
+        "Error creating conversation graph"
+      );
+      return res.status(500).json({
+        error: "An error occurred setting up the conversation",
+        message: (graphError as Error).message,
+      });
+    }
 
     // Run the conversation graph
     logger.debug(
       { conversationId: updatedState.conversationId },
       "Running conversation graph"
     );
-    const result = (await graph.invoke(updatedState)) as ConversationState;
 
-    // Calculate processing time
-    const processingTime = Date.now() - startTime;
+    try {
+      // Invoke the graph with our state
+      const resultState = await graph.invoke(updatedState);
 
-    // Save the updated state
-    await saveConversationState(result);
+      // Calculate processing time
+      const processingTime = Date.now() - startTime;
 
-    // Get the last AI message
-    const lastAiMessage = result.messages[result.messages.length - 1];
+      // Save the updated state
+      await saveConversationState(resultState);
 
-    // Build the response
-    const response: ChatResponse = {
-      message: lastAiMessage.content as string,
-      conversationId: result.conversationId,
-      actions: result.pending_actions.filter(
-        (action: any) => action.status === "completed"
-      ),
-      metadata: {
-        processingTime,
-        ...(metadata || {}),
-      },
-    };
+      // Get the last AI message
+      const lastAiMessage =
+        resultState.messages[resultState.messages.length - 1];
 
-    logger.info(
-      {
-        conversationId: result.conversationId,
-        processingTime,
-        actionCount: response.actions.length,
-      },
-      "Chat request processed successfully"
-    );
+      // Build the response
+      const response: ChatResponse = {
+        message: lastAiMessage.content as string,
+        conversationId: resultState.conversationId,
+        actions: resultState.pending_actions.filter(
+          (action: any) => action.status === "completed"
+        ),
+        metadata: {
+          processingTime,
+          ...(metadata || {}),
+        },
+      };
 
-    return res.json(response);
+      logger.info(
+        {
+          conversationId: resultState.conversationId,
+          processingTime,
+          actionCount: response.actions.length,
+        },
+        "Chat request processed successfully"
+      );
+
+      return res.json(response);
+    } catch (error) {
+      logger.error({ error }, "Error processing graph");
+
+      return res.status(500).json({
+        error: "An error occurred processing your request",
+        message: (error as Error).message,
+      });
+    }
   } catch (error) {
     logger.error({ error }, "Error processing chat request");
 
@@ -119,7 +164,7 @@ router.post("/chat", async (req, res) => {
  * GET /api/conversation/:conversationId
  * Get conversation history and metadata
  */
-// @ts-ignore - TODO: fix this
+// @ts-ignore -
 router.get("/:conversationId", async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -165,7 +210,7 @@ router.get("/:conversationId", async (req, res) => {
  * DELETE /api/conversation/:conversationId
  * Delete a conversation
  */
-// @ts-ignore - TODO: fix this
+// @ts-ignore -
 router.delete("/:conversationId", async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -189,6 +234,26 @@ router.delete("/:conversationId", async (req, res) => {
       message: (error as Error).message,
     });
   }
+});
+
+// @ts-ignore - debug endpoint
+router.get("/:conversationId/debug", async (req, res) => {
+  const { conversationId } = req.params;
+  const state = await getOrCreateConversationState(conversationId);
+  return res.json({
+    stateStructure: {
+      hasMessages: Array.isArray(state.messages),
+      messageCount: state.messages.length,
+      messageTypes: state.messages.map((m) =>
+        m._getType ? m._getType() : "unknown"
+      ),
+      hasContext: Array.isArray(state.context),
+      contextCount: state.context.length,
+      hasPendingActions: Array.isArray(state.pending_actions),
+      pendingActionsCount: state.pending_actions.length,
+    },
+    rawState: state,
+  });
 });
 
 export default router;

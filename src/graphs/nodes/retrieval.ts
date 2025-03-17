@@ -4,7 +4,7 @@ import { getLastHumanMessage } from "../state";
 import { createLogger } from "../../utils/logger";
 import { CONVERSATION } from "../../config/constants";
 
-const logger = createLogger("retrieval-node");
+const logger = createLogger("retrieval");
 
 /**
  * Retrieval node for LangGraph
@@ -14,21 +14,20 @@ const logger = createLogger("retrieval-node");
 export async function retrievalNode(
   state: ConversationState
 ): Promise<ConversationState> {
-  // Get the last human message to use as query
-  const lastMessage = getLastHumanMessage(state);
-
-  if (!lastMessage || !lastMessage.content) {
-    logger.debug(
-      { conversationId: state.conversationId },
-      "No human message found, skipping retrieval"
-    );
-
-    return state;
-  }
-
-  const query = lastMessage.content.toString();
-
   try {
+    // Get the last human message to use as query
+    const lastMessage = getLastHumanMessage(state);
+
+    if (!lastMessage || !lastMessage.content) {
+      logger.debug(
+        { conversationId: state.conversationId },
+        "No human message found, skipping retrieval"
+      );
+      return state;
+    }
+
+    const query = lastMessage.content.toString();
+
     logger.debug(
       { conversationId: state.conversationId, query },
       "Retrieving context"
@@ -45,9 +44,13 @@ export async function retrievalNode(
         { conversationId: state.conversationId },
         "No relevant context found"
       );
+
+      // Explicitly return validated state
       return {
-        ...state,
+        conversationId: state.conversationId,
+        messages: state.messages || [],
         context: [],
+        pending_actions: state.pending_actions || [],
       };
     }
 
@@ -65,20 +68,26 @@ export async function retrievalNode(
     );
 
     // Return updated state with context
+    // Explicitly validate all required state properties
     return {
-      ...state,
+      conversationId: state.conversationId,
+      messages: state.messages || [],
       context: formattedContext,
+      pending_actions: state.pending_actions || [],
     };
   } catch (error) {
     logger.error(
-      { error, conversationId: state.conversationId },
+      { error, conversationId: state?.conversationId },
       "Error retrieving context"
     );
 
     // Return state without context in case of error
+    // Ensure all fields are explicitly included
     return {
-      ...state,
+      conversationId: state.conversationId,
+      messages: state.messages || [],
       context: [],
+      pending_actions: state.pending_actions || [],
     };
   }
 }

@@ -1,0 +1,19 @@
+[
+    {
+        "_id": "6dd231eb-a031-4935-9596-54160a0b2fde",
+        "colId": "history",
+        "containerId": "",
+        "name": "http://localhost:3000/api/conversation/chat",
+        "url": "http://localhost:3000/api/conversation/chat",
+        "method": "POST",
+        "sortNum": 0,
+        "created": "2025-03-17T11:32:45.640Z",
+        "modified": "2025-03-17T15:07:08.335Z",
+        "headers": [],
+        "body": {
+            "type": "json",
+            "raw": "{\n  \"message\": \"A doctors appointment for 7pm tommorrow and its a checkup\",\n  \"conversationId\": \"conv_abdef53d-8ffd-4a11-94d4-ed180c848c47\"\n}",
+            "form": []
+        }
+    }
+]

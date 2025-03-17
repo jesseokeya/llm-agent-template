@@ -1,7 +1,5 @@
-import { StateGraph } from "@langchain/langgraph";
-// import { RunnableSequence } from "@langchain/core/runnables";
 import { ConversationState } from "../types/conversation";
-import { initialState } from "./state";
+// import { initialState } from "./state";
 import { retrievalNode } from "./nodes/retrieval";
 import { extractActionsNode } from "./nodes/extract-actions";
 import { executeActionsNode } from "./nodes/execute-actions";
@@ -10,186 +8,269 @@ import {
   generateResponseWithActionSummaryNode,
 } from "./nodes/generate";
 import { createLogger } from "../utils/logger";
+import { AIMessage } from "@langchain/core/messages";
 
 const logger = createLogger("conversation-graph");
 
 /**
  * Create the main conversation graph
- *
- * This graph implements the following flow:
- * 1. Retrieve relevant context
- * 2. Extract potential actions
- * 3. Execute actions if present
- * 4. Generate response based on context and action results
  */
 export function createConversationGraph() {
   logger.debug("Creating conversation graph");
 
-  // Create a new graph with the initial state
-  const builder = new StateGraph<ConversationState>({
-    channels: {
-      messages: { value: initialState.messages } as any,
-      context: { value: initialState.context } as any,
-      pending_actions: { value: initialState.pending_actions } as any,
-      conversationId: { value: initialState.conversationId } as any,
-    },
-  });
+  try {
+    return {
+      invoke: async (state: ConversationState) => {
+        logger.debug("Running full conversation graph");
 
-  // Add nodes to the graph
-  builder.addNode("retrieval", retrievalNode as any);
-  builder.addNode("extract_actions", extractActionsNode as any);
-  builder.addNode("execute_actions", executeActionsNode as any);
-  builder.addNode(
-    "generate_response",
-    generateResponseWithActionSummaryNode as any
-  );
+        try {
+          // Run nodes in sequence
+          let currentState = state;
 
-  // Define the edge connections (workflow)
-  (builder as any).addEdge("retrieval", "extract_actions");
-  (builder as any).addEdge("extract_actions", "execute_actions");
-  (builder as any).addEdge("execute_actions", "generate_response");
+          // Retrieval step
+          currentState = await retrievalNode(currentState);
 
-  // Set the entry point
-  (builder as any).setEntryPoint("retrieval");
+          // Extract actions step
+          currentState = await extractActionsNode(currentState);
 
-  // Compile the graph
-  const graph = builder.compile();
+          // Execute actions step
+          currentState = await executeActionsNode(currentState);
 
-  logger.info("Conversation graph created successfully");
+          // Generate response with action summary
+          currentState = await generateResponseWithActionSummaryNode(
+            currentState
+          );
 
-  return graph;
+          logger.debug("Conversation graph completed successfully");
+          return currentState;
+        } catch (error) {
+          logger.error(
+            { error, message: (error as Error).message },
+            "Error in conversation graph"
+          );
+          return createFallbackResponse(state);
+        }
+      },
+    };
+  } catch (error) {
+    logger.error(
+      { error, message: (error as Error).message },
+      "Error creating conversation graph"
+    );
+    return createFallbackGraph();
+  }
 }
 
 /**
  * Create a simpler RAG-only conversation graph
- *
- * This graph only retrieves context and generates a response,
- * without action extraction or execution.
  */
 export function createRagOnlyGraph() {
   logger.debug("Creating RAG-only conversation graph");
 
-  // Create a new graph with the initial state
-  const builder = new StateGraph<ConversationState>({
-    channels: {
-      messages: { value: initialState.messages } as any,
-      context: { value: initialState.context } as any,
-      pending_actions: { value: initialState.pending_actions } as any,
-      conversationId: { value: initialState.conversationId } as any,
-    },
-  });
+  try {
+    return {
+      invoke: async (state: ConversationState) => {
+        logger.debug("Running RAG-only conversation graph");
 
-  // Add nodes to the graph
-  builder.addNode("retrieval", retrievalNode as any);
-  builder.addNode("generate_response", generateResponseNode as any);
+        try {
+          // Run nodes in sequence
+          let currentState = state;
 
-  // Define the edge connections
-  (builder as any).addEdge("retrieval", "generate_response");
+          // Retrieval step
+          currentState = await retrievalNode(currentState);
 
-  // Set the entry point
-  (builder as any).setEntryPoint("retrieval");
+          // Generate response
+          currentState = await generateResponseNode(currentState);
 
-  // Compile the graph
-  const graph = builder.compile();
-
-  logger.info("RAG-only conversation graph created successfully");
-
-  return graph;
+          logger.debug("RAG-only graph completed successfully");
+          return currentState;
+        } catch (error) {
+          logger.error(
+            { error, message: (error as Error).message },
+            "Error in RAG-only graph"
+          );
+          return createFallbackResponse(state);
+        }
+      },
+    };
+  } catch (error) {
+    logger.error(
+      { error, message: (error as Error).message },
+      "Error creating RAG-only graph"
+    );
+    return createFallbackGraph();
+  }
 }
 
 /**
- * Create a custom graph with conditional branching based on action presence
+ * Create a minimal graph with just the generate response node
+ * Used for simple use cases or when other components aren't needed
+ */
+export function createMinimalGraph() {
+  logger.debug("Creating minimal conversation graph");
+
+  try {
+    return {
+      invoke: async (state: ConversationState) => {
+        logger.debug("Running minimal conversation graph");
+
+        try {
+          // Run the generate response node directly
+          const result = await generateResponseNode(state);
+          logger.debug("Minimal graph completed successfully");
+          return result;
+        } catch (error) {
+          logger.error(
+            { error, message: (error as Error).message },
+            "Error in minimal graph"
+          );
+          return createFallbackResponse(state);
+        }
+      },
+    };
+  } catch (error) {
+    logger.error(
+      { error, message: (error as Error).message },
+      "Error creating minimal graph"
+    );
+    return createFallbackGraph();
+  }
+}
+
+/**
+ * Create a graph with conditional branching based on action presence
  */
 export function createAdvancedConversationGraph() {
-  logger.debug("Creating advanced conversation graph with conditionals");
+  logger.debug("Creating advanced conversation graph");
 
-  // Create a new graph with the initial state
-  const builder = new StateGraph<ConversationState>({
-    channels: {
-      messages: { value: initialState.messages } as any,
-      context: { value: initialState.context } as any,
-      pending_actions: { value: initialState.pending_actions } as any,
-      conversationId: { value: initialState.conversationId } as any,
-    },
-  });
+  try {
+    return {
+      invoke: async (state: ConversationState) => {
+        logger.debug("Running advanced conversation graph");
 
-  // Add nodes to the graph
-  builder.addNode("retrieval", retrievalNode as any);
-  builder.addNode("extract_actions", extractActionsNode as any);
-  builder.addNode("execute_actions", executeActionsNode as any);
-  builder.addNode("generate_response", generateResponseNode as any);
-  builder.addNode(
-    "generate_with_actions",
-    generateResponseWithActionSummaryNode as any
-  );
+        try {
+          // Run nodes in sequence with conditional branching
+          let currentState = state;
 
-  // Define conditional routing - check if actions were extracted
-  (builder as any).addConditionalEdges(
-    "extract_actions",
-    (state: any) => {
-      // Route based on whether actions were extracted
-      return state.pending_actions.length > 0 ? "has_actions" : "no_actions";
-    },
-    {
-      has_actions: "execute_actions",
-      no_actions: "generate_response",
-    }
-  );
+          // Retrieval step
+          currentState = await retrievalNode(currentState);
 
-  // Connect execute_actions to generation with action summary
-  (builder as any).addEdge("execute_actions", "generate_with_actions");
+          // Extract actions step
+          currentState = await extractActionsNode(currentState);
 
-  // Connect retrieval to extract_actions
-  (builder as any).addEdge("retrieval", "extract_actions");
+          // Conditional branching based on detected actions
+          if (currentState.pending_actions.length > 0) {
+            // Execute actions if any were found
+            currentState = await executeActionsNode(currentState);
 
-  // Set the entry point
-  (builder as any).setEntryPoint("retrieval");
+            // Generate response with action summary
+            currentState = await generateResponseWithActionSummaryNode(
+              currentState
+            );
+          } else {
+            // Generate standard response if no actions
+            currentState = await generateResponseNode(currentState);
+          }
 
-  // Compile the graph
-  const graph = builder.compile();
-
-  logger.info("Advanced conversation graph created successfully");
-
-  return graph;
+          logger.debug("Advanced conversation graph completed successfully");
+          return currentState;
+        } catch (error) {
+          logger.error(
+            { error, message: (error as Error).message },
+            "Error in advanced conversation graph"
+          );
+          return createFallbackResponse(state);
+        }
+      },
+    };
+  } catch (error) {
+    logger.error(
+      { error, message: (error as Error).message },
+      "Error creating advanced conversation graph"
+    );
+    return createFallbackGraph();
+  }
 }
 
 /**
- * Create a custom graph with specific action type handling
+ * Helper to create a fallback response when a node fails
  */
-export function createCustomActionGraph(actionTypes: string[]) {
-  logger.debug({ actionTypes }, "Creating custom action graph");
+function createFallbackResponse(state: ConversationState): ConversationState {
+  return {
+    ...state,
+    messages: [
+      ...state.messages,
+      new AIMessage({
+        content: "I'm sorry, I encountered an error processing your request.",
+        additional_kwargs: { timestamp: Date.now() },
+      }),
+    ],
+  };
+}
 
-  // Create a new graph with the initial state
-  const builder = new StateGraph<ConversationState>({
-    channels: {
-      messages: { value: initialState.messages } as any,
-      context: { value: initialState.context } as any,
-      pending_actions: { value: initialState.pending_actions } as any,
-      conversationId: { value: initialState.conversationId } as any,
+/**
+ * Create a basic fallback graph that will always work
+ * Used when other graphs fail to initialize
+ */
+function createFallbackGraph() {
+  logger.warn("Creating fallback graph due to initialization errors");
+
+  return {
+    invoke: async (state: ConversationState) => {
+      try {
+        // Try to use retrieval and generate nodes directly if possible
+        let updatedState = state;
+
+        try {
+          updatedState = await retrievalNode(state);
+        } catch (e) {
+          logger.error({ error: e }, "Error in fallback retrieval");
+        }
+
+        try {
+          updatedState = await generateResponseNode(updatedState);
+        } catch (e) {
+          logger.error({ error: e }, "Error in fallback generation");
+
+          // If all else fails, add a manual response
+          if (
+            !updatedState.messages ||
+            updatedState.messages.length === 0 ||
+            updatedState.messages[
+              updatedState.messages.length - 1
+            ]._getType() !== "ai"
+          ) {
+            updatedState = {
+              ...updatedState,
+              messages: [
+                ...(updatedState.messages || []),
+                new AIMessage({
+                  content:
+                    "I apologize, but I'm having trouble processing your request right now. Our system is operating in fallback mode.",
+                  additional_kwargs: { timestamp: Date.now() },
+                }),
+              ],
+            };
+          }
+        }
+
+        return updatedState;
+      } catch (error) {
+        logger.error({ error }, "Critical error in fallback graph");
+
+        // Emergency recovery - return a basic response
+        return {
+          ...state,
+          messages: [
+            ...(state.messages || []),
+            new AIMessage({
+              content:
+                "I'm sorry, I'm having technical difficulties. Please try again later.",
+              additional_kwargs: { timestamp: Date.now() },
+            }),
+          ],
+        };
+      }
     },
-  });
-
-  // Add specialized nodes that only handle specific action types
-  builder.addNode("retrieval", retrievalNode as any);
-  builder.addNode("extract_actions", extractActionsNode as any);
-  builder.addNode("execute_actions", executeActionsNode as any);
-  builder.addNode(
-    "generate_response",
-    generateResponseWithActionSummaryNode as any
-  );
-
-  // Connect the nodes
-  (builder as any).addEdge("retrieval", "extract_actions");
-  (builder as any).addEdge("extract_actions", "execute_actions");
-  (builder as any).addEdge("execute_actions", "generate_response");
-
-  // Set the entry point
-  (builder as any).setEntryPoint("retrieval");
-
-  // Compile the graph
-  const graph = builder.compile();
-
-  logger.info("Custom action graph created successfully");
-
-  return graph;
+  };
 }

@@ -21,9 +21,16 @@ export function addHumanMessage(
     "Adding human message"
   );
 
+  const message = new HumanMessage(content);
+  // Add timestamp to ensure proper serialization
+  message.additional_kwargs = {
+    ...message.additional_kwargs,
+    timestamp: Date.now(),
+  };
+
   return {
     ...state,
-    messages: [...state.messages, new HumanMessage(content)],
+    messages: [...state.messages, message],
   };
 }
 
@@ -36,9 +43,16 @@ export function addAIMessage(
 ): ConversationState {
   logger.debug({ conversationId: state.conversationId }, "Adding AI message");
 
+  const message = new AIMessage(content);
+  // Add timestamp to ensure proper serialization
+  message.additional_kwargs = {
+    ...message.additional_kwargs,
+    timestamp: Date.now(),
+  };
+
   return {
     ...state,
-    messages: [...state.messages, new AIMessage(content)],
+    messages: [...state.messages, message],
   };
 }
 
@@ -54,9 +68,16 @@ export function addSystemMessage(
     "Adding system message"
   );
 
+  const message = new SystemMessage(content);
+  // Add timestamp to ensure proper serialization
+  message.additional_kwargs = {
+    ...message.additional_kwargs,
+    timestamp: Date.now(),
+  };
+
   return {
     ...state,
-    messages: [...state.messages, new SystemMessage(content)],
+    messages: [...state.messages, message],
   };
 }
 
