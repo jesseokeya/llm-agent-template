@@ -1,6 +1,6 @@
 # LLM Agent Application Template
 
-A production-grade LLM application built with LangGraph, LangChain.js, and TypeScript. This application provides conversational AI with action extraction capabilities and RAG for context enhancement.
+A production-grade LLM application template built with LangGraph, LangChain.js, and TypeScript. This application provides conversational AI with action extraction capabilities and RAG for context enhancement.
 
 ## Features
 
