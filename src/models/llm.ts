@@ -21,27 +21,38 @@ export function createChatModel() {
     temperature: LLM_TEMPERATURE,
     timeout: TIMEOUTS.LLM_REQUEST_TIMEOUT_MS,
     maxRetries: TIMEOUTS.RETRY_ATTEMPTS,
-    cache: true,
   });
 }
 
 /**
  * Create a function-calling enabled model with the provided functions
+ * This uses the newer OpenAI tools format
  */
-export function createFunctionCallingModel(functions: any[]) {
-  logger.debug(
-    `Creating function calling model with ${functions.length} functions`
-  );
+export function createFunctionCallingModel(tools: any[]) {
+  logger.debug(`Creating function calling model with ${tools.length} tools`);
 
-  return new ChatOpenAI({
+  // Create basic model
+  const model = new ChatOpenAI({
     openAIApiKey: OPENAI_API_KEY,
     modelName: LLM_MODEL,
     temperature: 0.1,
     timeout: TIMEOUTS.LLM_REQUEST_TIMEOUT_MS,
     maxRetries: TIMEOUTS.RETRY_ATTEMPTS,
-  }).bind({
-    tools: functions,
   });
+
+  try {
+    // Attach tools using different methods depending on API version
+    // @ts-ignore - Handle API differences in different versions
+    return model.bind({
+      tools: tools,
+    });
+  } catch (error) {
+    logger.error(
+      { error },
+      "Error setting up function calling, falling back to basic model"
+    );
+    return model;
+  }
 }
 
 /**
@@ -80,21 +91,24 @@ export function formatChatHistory(messages: BaseMessage[]): string {
     return messages
       .map((message) => {
         try {
-          // Safe access to message type using _getType method
           let role = "unknown";
+          let content = "";
 
-          if (typeof message._getType === "function") {
-            role = message._getType();
-          } else if (typeof message["_getType"] === "string") {
-            // Fallback for serialized messages
-            role = message["_getType"] as string;
-          } else {
-            // Last attempt to get type from any custom properties
-            role = (message as any).type || "unknown";
+          // Safely access the message type
+          if (message) {
+            if (typeof message._getType === "function") {
+              role = message._getType();
+            } else {
+              // Use any available property
+              const msg: any = message;
+              role =
+                msg.type ||
+                (typeof msg._getType === "string" ? msg._getType : "unknown");
+            }
+
+            // Safely access content
+            content = message.content ? message.content.toString() : "";
           }
-
-          // Safe access to content
-          const content = message.content || "";
 
           return `${
             role === "human" ? "Human" : role === "ai" ? "Assistant" : "System"

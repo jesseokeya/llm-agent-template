@@ -2,6 +2,8 @@
 
 A production-grade LLM application template built with LangGraph, LangChain.js, and TypeScript. This application provides conversational AI with action extraction capabilities and RAG for context enhancement.
 
+![Langraph Dashboard](images/langraph.png)
+
 ## Features
 
 - 🧠 **Advanced Conversational AI**: Utilizes OpenAI's latest models with effective prompt engineering

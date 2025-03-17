@@ -1,17 +1,15 @@
 import express from "express";
 import { z } from "zod";
-import { createMinimalGraph } from "../graphs/conversation-graph";
+import { createAdvancedConversationGraph } from "../graphs/conversation-graph";
 import {
   getOrCreateConversationState,
   saveConversationState,
 } from "../storage/conversation-store";
 import { addHumanMessage } from "../conversation/memory";
-import {
-  //   ChatRequest,
-  ChatResponse,
-  // ConversationState,
-} from "../types/conversation";
+import { ChatResponse } from "../types/conversation";
 import { createLogger } from "../utils/logger";
+import { v4 as uuidv4 } from "uuid";
+import { traceManager } from "../utils/trace-manager";
 
 const logger = createLogger("conversation-api");
 const router: express.Router = express.Router();
@@ -23,11 +21,14 @@ const chatRequestSchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
+// Store run IDs for parent-child relationships
+const runIdMap = new Map<string, string>();
+
 /**
  * POST /api/conversation/chat
  * Main endpoint for chat interactions
  */
-// @ts-ignore -
+// @ts-ignore - express router
 router.post("/chat", async (req, res) => {
   try {
     // Validate request
@@ -46,9 +47,12 @@ router.post("/chat", async (req, res) => {
 
     const { message, conversationId, metadata } = validationResult.data;
 
+    // Generate a conversation ID if not provided
+    const finalConversationId = conversationId || `conv_${uuidv4()}`;
+
     logger.info(
       {
-        conversationId: conversationId || "new",
+        conversationId: finalConversationId,
         messageLength: message.length,
       },
       "Processing chat request"
@@ -58,98 +62,77 @@ router.post("/chat", async (req, res) => {
     const startTime = Date.now();
 
     // Get or create conversation state
-    const state = await getOrCreateConversationState(conversationId);
+    const state = await getOrCreateConversationState(finalConversationId);
 
     // Add the user message to state
     const updatedState = addHumanMessage(state, message);
 
-    // Add detailed logging of the state structure
-    logger.debug(
-      {
-        conversationId: updatedState.conversationId,
-        stateStructure: {
-          hasMessages: Array.isArray(updatedState.messages),
-          messagesCount: updatedState.messages.length,
-          hasContext: Array.isArray(updatedState.context),
-          hasPendingActions: Array.isArray(updatedState.pending_actions),
-          stateKeys: Object.keys(updatedState),
-        },
-      },
-      "State structure before graph invocation"
-    );
+    // Create a new run ID and get parent run ID if available
+    const runId = uuidv4();
+    const parentRunId = runIdMap.get(finalConversationId);
 
     // Create the conversation graph
-    let graph;
-    try {
-      // Try using the minimal fallback graph which has built-in error handling
-      graph = createMinimalGraph();
-      logger.debug("Minimal fallback graph created successfully");
-    } catch (graphError) {
-      logger.error(
-        {
-          error: graphError,
-          message: (graphError as Error).message,
-          stack: (graphError as Error).stack,
-        },
-        "Error creating conversation graph"
-      );
-      return res.status(500).json({
-        error: "An error occurred setting up the conversation",
-        message: (graphError as Error).message,
-      });
-    }
+    const graph = createAdvancedConversationGraph();
 
-    // Run the conversation graph
+    // Set up tracing for this conversation
+    await traceManager.setupTraceSession(finalConversationId);
+
+    // Run the conversation graph with tracing info
     logger.debug(
       { conversationId: updatedState.conversationId },
       "Running conversation graph"
     );
 
-    try {
-      // Invoke the graph with our state
-      const resultState = await graph.invoke(updatedState);
-
-      // Calculate processing time
-      const processingTime = Date.now() - startTime;
-
-      // Save the updated state
-      await saveConversationState(resultState);
-
-      // Get the last AI message
-      const lastAiMessage =
-        resultState.messages[resultState.messages.length - 1];
-
-      // Build the response
-      const response: ChatResponse = {
-        message: lastAiMessage.content as string,
-        conversationId: resultState.conversationId,
-        actions: resultState.pending_actions.filter(
-          (action: any) => action.status === "completed"
-        ),
+    // Run with tracing context
+    const result = await traceManager.runWithTracing(
+      finalConversationId,
+      () => graph.invoke(updatedState),
+      {
+        runId,
+        parentRunId,
         metadata: {
-          processingTime,
-          ...(metadata || {}),
+          conversationId: finalConversationId,
+          messageIndex: state.messages.length,
         },
-      };
+      }
+    );
 
-      logger.info(
-        {
-          conversationId: resultState.conversationId,
-          processingTime,
-          actionCount: response.actions.length,
-        },
-        "Chat request processed successfully"
-      );
+    // Store this run ID for future requests
+    runIdMap.set(finalConversationId, runId);
 
-      return res.json(response);
-    } catch (error) {
-      logger.error({ error }, "Error processing graph");
+    // Calculate processing time
+    const processingTime = Date.now() - startTime;
 
-      return res.status(500).json({
-        error: "An error occurred processing your request",
-        message: (error as Error).message,
-      });
-    }
+    // Save the updated state
+    await saveConversationState(result);
+
+    // Get the last AI message
+    const lastAiMessage = result.messages[result.messages.length - 1];
+
+    // Build the response
+    const response: ChatResponse = {
+      message: lastAiMessage.content as string,
+      conversationId: finalConversationId,
+      actions: result.pending_actions.filter(
+        (action: any) => action.status === "completed"
+      ),
+      metadata: {
+        processingTime,
+        traceId: runId,
+        ...(metadata || {}),
+      },
+    };
+
+    logger.info(
+      {
+        conversationId: finalConversationId,
+        processingTime,
+        actionCount: response.actions.length,
+      },
+      "Chat request processed successfully"
+    );
+
+    return res.json(response);
   } catch (error) {
     logger.error({ error }, "Error processing chat request");
 
@@ -164,7 +147,7 @@ router.post("/chat", async (req, res) => {
  * GET /api/conversation/:conversationId
  * Get conversation history and metadata
  */
-// @ts-ignore -
+// @ts-ignore - express router
 router.get("/:conversationId", async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -183,9 +166,9 @@ router.get("/:conversationId", async (req, res) => {
 
     // Format messages for the response
     const messages = state.messages.map((message) => ({
-      role: message._getType(),
+      role: message._getType ? message._getType() : "unknown",
       content: message.content,
-      timestamp: message.additional_kwargs.timestamp || Date.now(),
+      timestamp: message.additional_kwargs?.timestamp || Date.now(),
     }));
 
     return res.json({
@@ -210,7 +193,7 @@ router.get("/:conversationId", async (req, res) => {
  * DELETE /api/conversation/:conversationId
  * Delete a conversation
  */
-// @ts-ignore -
+// @ts-ignore - express router
 router.delete("/:conversationId", async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -234,26 +217,6 @@ router.delete("/:conversationId", async (req, res) => {
       message: (error as Error).message,
     });
   }
-});
-
-// @ts-ignore - debug endpoint
-router.get("/:conversationId/debug", async (req, res) => {
-  const { conversationId } = req.params;
-  const state = await getOrCreateConversationState(conversationId);
-  return res.json({
-    stateStructure: {
-      hasMessages: Array.isArray(state.messages),
-      messageCount: state.messages.length,
-      messageTypes: state.messages.map((m) =>
-        m._getType ? m._getType() : "unknown"
-      ),
-      hasContext: Array.isArray(state.context),
-      contextCount: state.context.length,
-      hasPendingActions: Array.isArray(state.pending_actions),
-      pendingActionsCount: state.pending_actions.length,
-    },
-    rawState: state,
-  });
 });
 
 export default router;

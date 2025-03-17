@@ -5,6 +5,7 @@ import {
   validateActionData,
 } from "../../tools/function-definitions";
 import { getLastHumanMessage } from "../state";
+import { HumanMessage } from "@langchain/core/messages";
 import { createAction } from "../../storage/action-store";
 import { ActionStatus } from "../../config/constants";
 import { createLogger } from "../../utils/logger";
@@ -12,7 +13,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const logger = createLogger("extract-actions");
 
-// Initialize function calling model
+// Initialize function calling model with updated function definitions
 const functionCallingModel = createFunctionCallingModel(functionDefinitions);
 
 /**
@@ -41,14 +42,39 @@ export async function extractActionsNode(
     );
 
     // Call the model with function calling enabled
-    const response = await functionCallingModel.invoke(
-      lastMessage.content.toString()
-    );
+    const response = await functionCallingModel.invoke([
+      new HumanMessage(lastMessage.content.toString()),
+    ]);
 
-    // Check if a function was called
-    const functionCall = response.additional_kwargs.function_call;
+    // Check if a function was called - handle different API versions
+    const toolCalls = response.additional_kwargs?.tool_calls;
+    const functionCall = response.additional_kwargs?.function_call;
 
-    if (!functionCall) {
+    let extractedAction = null;
+
+    // Handle newer OpenAI API which uses tool_calls
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      logger.debug({ toolCalls }, "Found tool calls in response");
+
+      const firstTool = toolCalls[0];
+      if (firstTool.type === "function" && firstTool.function) {
+        extractedAction = {
+          name: firstTool.function.name,
+          arguments: firstTool.function.arguments,
+        };
+      }
+    }
+    // Handle older API which uses function_call
+    else if (functionCall) {
+      logger.debug({ functionCall }, "Found function call in response");
+      extractedAction = {
+        name: functionCall.name,
+        arguments: functionCall.arguments,
+      };
+    }
+
+    // If no action was detected, return current state
+    if (!extractedAction) {
       logger.debug(
         { conversationId: state.conversationId },
         "No action detected"
@@ -58,8 +84,8 @@ export async function extractActionsNode(
 
     try {
       // Parse the function arguments
-      const actionName = functionCall.name;
-      const actionArgs = JSON.parse(functionCall.arguments);
+      const actionName = extractedAction.name;
+      const actionArgs = JSON.parse(extractedAction.arguments);
 
       logger.info(
         { conversationId: state.conversationId, actionType: actionName },
@@ -111,77 +137,13 @@ export async function extractActionsNode(
     }
   } catch (error) {
     logger.error(
-      { error, conversationId: state.conversationId },
+      {
+        error,
+        message: (error as Error).message,
+        conversationId: state.conversationId,
+      },
       "Error extracting actions"
     );
     return state;
   }
-}
-
-/**
- * Create a specialized action extraction node that only extracts specific action types
- */
-export function createSpecificActionExtractor(actionTypes: string[]) {
-  // Filter function definitions to only include specified types
-  const filteredDefinitions = functionDefinitions.filter((def) =>
-    actionTypes.includes(def.name)
-  );
-
-  // Create specialized model
-  const specializedModel = createFunctionCallingModel(filteredDefinitions);
-
-  return async (state: ConversationState): Promise<ConversationState> => {
-    const lastMessage = getLastHumanMessage(state);
-
-    if (!lastMessage || !lastMessage.content) {
-      return state;
-    }
-
-    try {
-      // Call the specialized model
-      const response = await specializedModel.invoke(
-        lastMessage.content.toString()
-      );
-
-      const functionCall = response.additional_kwargs.function_call;
-
-      if (!functionCall) {
-        return state;
-      }
-
-      // Process extracted action
-      const actionName = functionCall.name;
-      const actionArgs = JSON.parse(functionCall.arguments);
-
-      // Validation and storage logic same as above
-      const validation = validateActionData(actionName, actionArgs);
-
-      if (!validation.valid) {
-        return state;
-      }
-
-      const actionId = `pending_${uuidv4()}`;
-
-      const pendingAction: PendingAction = {
-        id: actionId,
-        type: actionName,
-        data: actionArgs,
-        status: ActionStatus.PENDING,
-      };
-
-      await createAction({
-        conversationId: state.conversationId,
-        type: actionName,
-        data: actionArgs,
-      });
-
-      return {
-        ...state,
-        pending_actions: [...state.pending_actions, pendingAction],
-      };
-    } catch (error) {
-      logger.error({ error }, "Error in specialized action extractor");
-      return state;
-    }
-  };
 }
