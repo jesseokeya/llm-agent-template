@@ -14,7 +14,7 @@ async function main() {
 
     // Start the action processor worker
     // This runs in the same process for simplicity
-    // In production, you'd run this as a separate service
+    // In production, you'd run this as a separate service.
     if (NODE_ENV !== "test") {
       startActionProcessor(10, 5000).catch((error) => {
         logger.error({ error }, "Error in action processor");
