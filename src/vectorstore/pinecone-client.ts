@@ -1,9 +1,5 @@
 import { Pinecone } from "@pinecone-database/pinecone";
-import {
-  PINECONE_API_KEY,
-  PINECONE_ENVIRONMENT,
-  PINECONE_INDEX,
-} from "../config/env";
+import { PINECONE_API_KEY, PINECONE_INDEX } from "../config/env";
 import { createLogger } from "../utils/logger";
 
 const logger = createLogger("pinecone");
@@ -23,16 +19,10 @@ export async function initPinecone() {
   logger.info("Initializing Pinecone client");
 
   try {
-    const pineconeConfig: any = {
+    // Initialize Pinecone client with the current SDK's recommended pattern
+    pineconeInstance = new Pinecone({
       apiKey: PINECONE_API_KEY,
-    };
-
-    // Add environment if provided
-    if (PINECONE_ENVIRONMENT) {
-      pineconeConfig.environment = PINECONE_ENVIRONMENT;
-    }
-
-    pineconeInstance = new Pinecone(pineconeConfig);
+    });
 
     // Validate connection by listing indexes
     await pineconeInstance.listIndexes();
