@@ -1,0 +1,145 @@
+// llm-agent-template Cursor Rules
+// These rules define the coding standards and practices for the llm-agent-template project
+
+// TypeScript rules
+typescript {
+  // Use explicit types for function parameters and return types
+  prefer_explicit_types: true;
+
+  // Enforce consistent import style
+  import_style: "named";
+
+  // Prefer interfaces over types for object definitions
+  prefer_interface_over_type: true;
+
+  // Enforce using optional chaining and nullish coalescing
+  prefer_optional_chaining: true;
+  prefer_nullish_coalescing: true;
+
+  // Enforce using const assertions for literals
+  prefer_const_assertion: true;
+}
+
+// React rules
+react {
+  // Prefer functional components over class components
+  prefer_functional_components: true;
+
+  // Use React hooks for state and effects
+  prefer_hooks: true;
+
+  // Enforce proper dependency arrays in useEffect
+  enforce_effect_dependencies: true;
+
+  // Prefer destructuring props
+  prefer_props_destructuring: true;
+
+  // Enforce proper key usage in lists
+  enforce_key_usage: true;
+}
+
+// Code style rules
+style {
+  // Use single quotes for strings
+  quotes: "single";
+
+  // Use trailing commas in multiline objects and arrays
+  trailing_comma: true;
+
+  // Maximum line length
+  max_line_length: 120;
+
+  // Tab width
+  tab_width: 2;
+
+  // Use semicolons
+  semicolons: true;
+
+  // Enforce consistent naming conventions
+  naming_convention {
+    // PascalCase for components and types
+    component: "PascalCase";
+    interface: "PascalCase";
+    type: "PascalCase";
+
+    // camelCase for variables, functions, and methods
+    variable: "camelCase";
+    function: "camelCase";
+    method: "camelCase";
+
+    // UPPER_CASE for constants
+    constant: "UPPER_CASE";
+  }
+}
+
+// Project structure rules
+structure {
+  // Enforce consistent file organization
+  web_components_dir: "packages/web/components";
+  web_app_dir: "packages/web/app";
+  server_src_dir: "packages/server/src";
+  utils_src_dir: "packages/utils/src";
+
+  // Enforce consistent file naming
+  file_naming: "kebab-case";
+
+  // Enforce consistent directory structure
+  enforce_directory_structure: true;
+}
+
+// Import rules
+imports {
+  // Group and sort imports
+  group_imports: true;
+
+  // Prefer absolute imports for project modules
+  prefer_absolute_imports: true;
+
+  // Avoid circular dependencies
+  avoid_circular_dependencies: true;
+}
+
+// Testing rules
+testing {
+  // Enforce test file naming convention
+  test_file_suffix: ".test.ts";
+
+  // Enforce test coverage thresholds
+  coverage_threshold: 80;
+}
+
+// Documentation rules
+documentation {
+  // Enforce JSDoc for public APIs
+  require_jsdoc_for_public_apis: true;
+
+  // Enforce consistent comment style
+  comment_style: "//";
+}
+
+// Performance rules
+performance {
+  // Avoid unnecessary re-renders
+  avoid_unnecessary_rerenders: true;
+
+  // Use memoization for expensive computations
+  use_memoization: true;
+}
+
+// Accessibility rules
+accessibility {
+  // Enforce proper aria attributes
+  enforce_aria_attributes: true;
+
+  // Enforce alt text for images
+  enforce_alt_text: true;
+}
+
+// Security rules
+security {
+  // Avoid using dangerouslySetInnerHTML
+  avoid_dangerous_html: true;
+
+  // Enforce proper handling of user input
+  sanitize_user_input: true;
+}
