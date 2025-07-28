@@ -18,7 +18,7 @@
     "@langchain/langgraph": "^0.2.55",
     "@langchain/openai": "^0.4.4",
     "@langchain/pinecone": "^0.2.0",
-    "@pinecone-database/pinecone": "^5.1.1",
+    "@pinecone-database/pinecone": "^6.1.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
